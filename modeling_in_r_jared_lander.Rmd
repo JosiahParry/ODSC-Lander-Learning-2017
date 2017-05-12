@@ -1,0 +1,344 @@
+---
+title: "R Notebook"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+```{r}
+library(tidyverse)
+library(data.table)
+
+```
+
+`<-`is read as gets.
+
+Lets create a sample vector from from a discrete uniform distribution
+
+d.r.y > dont repeat yourself. Use functions you've already created in other functions
+```{r}
+x <- sample(1:100, size = 100, replace = T)
+mean(x)
+var(x)
+sd(x) # square root of variance
+median(x)
+min(x)
+max(x)
+range(x)
+summary(x)
+```
+
+Missing Data
+Lets create 
+y <- x
+y[sample(1:100, 20, replace = FALSE)] <- NA # When sampling 1:20 no replacement and getting 20 values replaces all 20 values
+
+When you compute the mean of y with NAs 
+NAs can introduce bias
+When NAs are present in small datasets can cause problems 
+mean(y, na.rm = TRUE)
+
+People want relationships not "correlation"
+
+--------
+## T-tests
+
+William Gosset (also known as Student) was the creator of the `t test`. He was the chief brewer at Guiness. 
+
+
+```{r}
+# Lets get some data to do some t-tests
+data(tips, package = "reshape2")
+
+# Preview 
+head(tips)
+```
+`reshape2` is a package written by Hadley (of course) that has been superceded by `tidyr`.
+
+A `t-test` is used to dtermine the averagre of a set of data. A mean doesn't take into account the variance / spread of the data. The t-test asks, is it *really* different?
+
+#### QUESTION: Is the average tip significantly different 
+
+```{r}
+t.test(tips$tip, alternative="two.sided", mu = 2.5)
+# Alternative, want to see if it is either greater or smaller than an average of 2.5
+```
+The output produced a *statistically significant* output, this means that the average tip *is* not on average 2.5.
+
+These data also contain the sex ofthe data. So we could look at a two-sample t-test and check if there are sex differences. We can use the formula interface.
+
+The left hand side of the formula is what you are computing, the right hand side is what you are spliting your data on. 
+```{r}
+t.test(tip ~ sex, data = tips, var.equal = TRUE)
+```
+
+As an aside: ANOVA is the same thing as regression with only 1 categorical variable. Just use regression.
+
+**********
+
+# Linear Regression
+
+```{r}
+data(father.son, package = "UsingR")
+```
+
+Using a famous dataset to look at the height of a father, and the height of a son. The package is hidden in the package called `UsingR`.
+
+Use this to define the conditional relationship between response and predictor. 
+
+```{r}
+father.son %>% 
+  ggplot(aes(fheight, sheight)) + geom_point() + geom_smooth(method = "lm")
+```
+```{r}
+heights_lm <- lm(sheight ~ fheight, data = father.son)
+summary(heights_lm)
+```
+If a fathers height is 0, the sons height will by 33.88" (lol, thats not possible, but we keep it). For every one unit increase in fheight, we see a .51" for the son.
+
+Things with extreme values tend to lead to less extreme values, known as *regressing to the mean*.
+
+### "Lets take a momemnt to decronstruct these things and tell you why you don't care about those"
+
+*If* you care about the p-value, care about the overall model p-value.
+
+Use cross validation to see if the model is fitting well. If they don't go and change the model. 
+
+R<sup>2</sup> tells you how much variance you're explaining.
+
+This model doesn't account for other explanatory variables. 
+
+# Multiple Regression
+
+```{r}
+housing <- read_csv("http://www.jaredlander.com/data/housing1.csv")
+head(housing)
+```
+
+```{r}
+ggplot(housing, aes(x = ValuePerSqFt)) + geom_histogram(binwidth = 10)
+```
+This histogram shows a bi-modal distribution.
+ 
+```{r}
+ggplot(housing, aes(x=ValuePerSqFt, fill = Boro)) + geom_histogram(binwidth = 10)
+```
+Manhattan seems to be the cause of the bi-modal distribution.
+
+```{r}
+housing <- housing %>% filter(Units < 1000)
+ggplot(housing, aes(x=ValuePerSqFt, fill = Boro)) + geom_histogram(binwidth = 10)
+```
+
+We're going to fit our first MLR
+
+```{r}
+housing_lm1 <- lm(ValuePerSqFt ~ Units + SqFt + Boro, data = housing)
+summary(housing_lm1)
+```
+
+We can plot these coeficients using the library `coefplot`, because people prefer pictures to tables. 
+```{r}
+library(coefplot)
+coefplot(housing_lm1, sort ="magnitude")
+```
+
+In this plot there is no `Bronx` boro. This is because there is `n-1` dummy variables. 
+
+### Building our own dataset 
+
+`tribble` allows you to build a dataframe by the rows.
+```{r}
+boros <- tibble::tribble(
+  ~Boro, ~Pop, ~Size, ~Random,
+  "Manhattan", 1644518, 23, 5,
+  "Queens", 2339150, 109, 1,
+  "Brooklyn", 2636735, 71, 35,
+  "Bronx", 1454440, 42, 30,
+  "Staten Island", 474558, 58, 10)
+
+boros
+```
+
+### `model.matrix`
+`lm` calls `model.matrix()`. It takes a formula interface and gives you back a numeric matrix. We are building **R**'s linear model function. 
+
+If using interaction terms, you only need to provide the interaction 
+
+```{r}
+model.matrix(~Pop + Size, boros)
+```
+What about interaction terms. This looks at the multiplicative effect. 
+```{r}
+model.matrix(~Pop * Size, boros)
+```
+Using the `:` will give you just the interaction. 
+```{r}
+model.matrix(~ Pop : Size, boros)
+```
+```{r}
+model.matrix(~Pop + Pop : Size, boros)
+```
+
+```{r}
+model.matrix(~ Pop * Size - Size, boros)
+```
+```{r}
+model.matrix(~ Pop / Size, boros) # Shows population and interaction of size
+```
+> "It's not against the rules if they give you syntax for it." -JL
+
+When you provide a factor / string, it creates the dummy variables for you.
+```{r}
+model.matrix(~Pop + Boro, boros)
+```
+Use `model.matrix()` for creating dummy variables. The baseline doesn't matter except for how you are interpreting. 
+
+Now were going interact a continuous and a factor
+```{r}
+broom::tidy(model.matrix(~ Pop * Boro, boros))
+```
+
+Lets interact three variables
+```{r}
+broom::tidy(model.matrix(~Pop * Size * Random, boros))
+```
+Gives you the 2 term interactions and the three term interactions. 
+
+```{r}
+model.matrix(~Pop + log(Pop), boros) # Log gives you the base e log, not base 10
+```
+Often times you would square a variable to make a parabolic relationships, e.g. age. 
+
+```{r}
+model.matrix(~Pop +Size^2, boros)
+```
+
+```{r}
+model.matrix(~Size + I(Size^2), boros) # When you square the variable R refuses to show both for simplicity
+```
+
+The function `I()` coerces R into keeping the variable. 
+
+Now that we have a strong understanding of the formula interface, let's use it in other models. 
+
+#### ANNDDD BACK TO LINEAR MODELLING
+Based on our coef plot we see that Sqft has no significance. Maybe we can interact it.
+
+```{r}
+house2 <- lm(ValuePerSqFt ~ Units*SqFt + Boro, data = housing)
+summary(house2)
+```
+```{r}
+coefplot(house2, sort = "mag")
+```
+Based on this plot, there seems to be little significance again. Maybe we have too many terms. Let use just the interaction.
+
+```{r}
+house3 <- lm(ValuePerSqFt ~ Units : SqFt + Boro, housing)
+coefplot(house3, sort="mag")
+```
+Scaling: Subtracting each observation by mean and dividing by sd. Use the `scale()` function.
+```{r}
+house4 <- lm(ValuePerSqFt ~ scale(Units) + scale(SqFt) + Boro, data = housing)
+coefplot(house4, sort = "mag")
+```
+```{r}
+multiplot(housing_lm1, house2, house3)
+```
+Use a multi-plot to view a cross validated model to see how well they agree. 
+For example you could model elections and see how coefficients vary by year. (thought to myself: this would help you in weighting variables)
+
+Jared's preferred method of model evaluation is using *AIC or BIC*. When looking at AIC and BIC **lower is better**. Although the p-value may be different, the model is exactly the same when scaling as displayed by AIC / BIC.
+
+BIC is punitive for # of explanatory variables.
+
+```{r}
+AIC(housing_lm1, house2, house3, house4)
+BIC(housing_lm1, house2, house3, house4)
+```
+
+Going read in another housing dataset from Jared's website.
+```{r}
+housing_new <- readr::read_csv("http://www.jaredlander.com/data/housingNew.csv")
+head(housing_new)
+```
+Lets create some predictions! WOOOH. We're going to use this asa test set 
+
+prediction intervals are wider. Confidence Interval is about deviation from the mean. Prediction intervals inherently have more uncertainty. 
+
+```{r}
+house_pred <- predict(house2, newdata = housing_new,
+                      se.fit = TRUE, interval="prediction")
+head(house_pred$fit) # The fit now provides the fitted value, the pred interval lower & upper bounds 
+```
+
+Linear regression is inhibitted by binary classification. Generalize Linear Models fit this best 
+
+_____
+
+# Generalized Linear Models
+
+We're going to start with a logistic regression. For this exploration we are using the *American Community Survey* of New York. The Census is one of the strongest datasets in the world / United States. 
+
+```{r}
+acs <- read.csv("https://www.jaredlander.com/data/acs_ny.csv", stringsAsFactors = FALSE, header = T)
+head(acs)
+```
+
+We want to model if whether or not people make 120k dollars or not. We need to first create a new variable. Creating a `TRUE` or `FALSE` variable.
+
+```{r}
+acs$income <- acs$FamilyIncome >= 120000
+```
+
+Since this is a generalized model, use the `glm()` function. If the family used was "gaussian" it would fit a regular linear model. By default `glm()` uses logistic regression. 
+
+```{r}
+income1 <- glm(income ~ HouseCosts + NumWorkers + OwnRent + NumBedrooms + FamilyType, 
+               data = acs,
+               family = binomial)
+summary(income1)
+# View coefplot to view coefficients
+coefplot(income1, sort = "mag")
+```
+Fitting a model isn't good enough. You have to be able to interpret it. Since logit regression is based on a logistic growth curve. The effect of the coefficient increases at an increasing rate until it reaches the inflection point, then increases at a decreasing model. 
+
+You need to use an inverse logit to get it back into probability
+
+# Poisson Regression
+
+Use poisson regression is used for count data. Luckily the ACS data has # of children. We will predict the total number of kids. 
+
+If your count doesnt go higher than 7 - 20, use poisson. Poisson is strongest for small counts. Once the mean approaches ~20, the poisson distribution approximates a normal distribution, and therefore is supported well by a regular linear model. 
+
+```{r}
+children1 <- glm(NumChildren ~ FamilyIncome + FamilyType + OwnRent, 
+                 data = acs,
+                 family = poisson)
+summary(children1)
+coefplot(children1, sort = "mag")
+```
+People who rent have more children relative to mortgage. People who own their houses outright have fewer children living with them relative to those who pay mortgage.
+
+This could be because when people are younger they are paying off their mortgages and have kids living with them. By the time their houses are paid for their children have moved.
+
+Poisson regression is almost always "overdispersed". **What is overdispersed???**.
+
+The poisson distribution's mean is the same as it's variance. Lambda = variance. However, in reality the distribution is going to be more dispersed than the mean. 
+
+So, how do you account for this?
+
+```{r}
+children2 <- glm(NumChildren ~ FamilyIncome + FamilyType + OwnRent, 
+                 data = acs,
+                 family = quasipoisson)
+multiplot(children1, children2)
+```
+
+If you want to make a more conservative estimate by accounting for more uncertainty, you could use a quasipoisson distribution / link.
+
+
+
+
+

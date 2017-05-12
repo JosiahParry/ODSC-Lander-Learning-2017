@@ -1,0 +1,280 @@
+---
+title: "Machine Learning"
+subtitle: Jared Lander Workshop ODSC East 2017
+output:
+  html_document:
+    keep_md: TRUE
+---
+
+Going to be convering:
+
+  - Penalized regression
+  - Boosted trees
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(glmnet)
+library(glmnet)
+library(useful)
+library(coefplot)
+```
+
+# Penalized Regression
+
+Essentially taking least squared regression and adding on a "penalty term". This is called "lasso" or "ridge" regression.
+
+We will be making an elastic net which is a combination of the two. The point of these penalties are to constrain these variables.
+
+This penalty prevents the betas from becoming to big thus prevents overfitting. Constraining betas makes them fit better.
+
+## Elastic Net
+
+The whole idea is to constrain things. When we sum the betas, add them, then iteratively "squash them down". How important is the penalty? That is the lambda. How big of an effect should this have on the fit of the model. 
+
+Lasso: B<sub>j</sub> (the absolute value, angular) <br>
+Ridge: B<sup>2</sup><sub>j</sub> (the squared term, has rounded shape)
+
+"Who says the regression gives you the 'right' beta values."
+
+A lasso can completely "zero out" a variable. Ridge asymptotically approach 0. This is called parsimony, sparsity, or variable selection.
+
+The goal is to implement this in R.
+
+```{r}
+acs <- read.table("https://www.jaredlander.com/data/acs_ny.csv", 
+                  stringsAsFactors = FALSE,
+                  sep = ",", header = T)
+acs$income <- acs$FamilyIncome > 120000
+head(acs)
+```
+
+```{r}
+acs_formula <- income ~ NumBedrooms + NumChildren + NumPeople + NumRooms + NumUnits + NumVehicles + NumWorkers + OwnRent + YearBuilt + ElectricBill + FoodStamp + HeatingFuel + Insurance - 1
+
+acs_x <- build.x(acs_formula, data = acs, contrasts = F) 
+broom::tidy(head(acs_x))
+
+```
+
+We drop a variable when coding to dummy variables to reduce colinearity. 
+
+We're going to make another matrix for the y.
+```{r}
+acs_y <- build.y(acs_formula, data = acs)
+```
+
+Let's make a modelllllll. (it's called gluhmnet)
+
+### Building Lasso
+
+Like the standards `glm()`, `glmnet()` uses a guassian distribution by default. By default, `glmnet()` builds a lasso.
+
+```{r}
+acs1 <- glmnet(x = acs_x, y = acs_y, family = "binomial")
+plot(acs1, xvar="lambda")
+```
+THe lambda controls how much impact the penalty term has. When you fit  a lasso, it fits 60 - 100 models simultaneous, each with a different lambda value.
+
+The Y axis is the value of the coefficients for any given value of lambda. Each line is a different variables (including each factor value). The smaller the penalty the bigger your coefficient can be. The bigger they are, the smaller it is. 0 penalty is regular least squares regression. 
+
+When a variable hits 0, it always stays 0. The curvature is the regularization / the variable is getting closer to 0. This is the **variable selection portion** of this.
+
+Now this leads to the question of: which lambda do we choose to use?
+**USE CROSS VALIDATION!**
+
+```{r}
+acs_cv1 <- cv.glmnet(x = acs_x, y = acs_y, family = "binomial", nfold = 5)
+plot(acs_cv1)
+```
+
+The plot now shows for different levels of penalty, an error measurement. The first vertical line shows the absolute minimum deviance, meaning it is performing the absolute best. The second vertical line represents the most "parsimonious" model. It is the simplest model within 1 standard deviation away from the model with the least deviance. The two models have "essentially" the same amount of error. 
+
+**Coefficient Plot** to view how the coefficients change w/ lambda.
+```{r}
+coefplot(acs_cv1, sort="mag", lambda = "lambda.1se")
+
+```
+### Building Ridge Regression
+
+By setting the alpha to 0, we perform ridge regression. This is because the lasso term is multiplied by alpha, where as by default the alpha is 1 which is multiplied by the ridge term. 
+```{r}
+acs_cv2 <- cv.glmnet(x = acs_x, y = acs_y, family = "binomial",
+                     nfolds = 5, alpha = 0)
+```
+
+You can have an intermediate value between 0 - 1 to equal your alpha value. This can meld the two together. Setting alpha between 1 and 0 is **elastic net**.
+
+```{r}
+acs_cv3 <- cv.glmnet(x = acs_x, y = acs_y, family = "binomial",
+                     nfolds = 5,
+                     alpha = .5)
+```
+```{r}
+par(mfrow = c(3,1))
+plot(acs_cv1$glmnet.fit, xvar = "lambda", main = "Lasso")
+abline(v = log(c(acs_cv1$lambda.min,acs_cv1$lambda.1se)), lty = 3)
+plot(acs_cv2$glmnet.fit, xvar = "lambda", main = "Ridge")
+abline(v = log(c(acs_cv2$lambda.min,acs_cv2$lambda.1se)), lty = 3)
+plot(acs_cv3$glmnet.fit, xvar = "lambda", main = "Lasso-Ridge")
+abline(v = log(c(acs_cv3$lambda.min,acs_cv3$lambda.1se)), lty = 3)
+par(mfrow = c(1,1))
+```
+ 
+Context of the data matters.
+
+
+
+# Decision Trees
+
+Within a certain multidimensional region of xs, take the average value of y within that region. Trees are high variance models. We will use German credit data.
+
+```{r}
+library(rpart)
+library(rpart.plot)
+# Load data
+load(url("https://www.jaredlander.com/data/credit.rdata"))
+# rdata is a special binary format that is read quickly by r
+head(credit)
+```
+The `rpart` package can only use the formula interface.
+
+```{r}
+credit_tree <- rpart(Credit ~ CreditAmount + Age + CreditHistory + Employment, 
+                     data = credit)
+
+rpart.plot(credit_tree, extra = 5)
+```
+#### What does this plot mean?
+
+We are asking a series of questions. The first question it asks is your credit history either `critical account, late payment, up to date` There is a 40% chance of having good credit, 60% not. Then you follow the tree down. The left hand side is the probability of having good credit (our DV). The rpart tree always splits in two.
+
+Boosted trees are a lot of very tall, weak trees. Whereas randomforest are a lot of very wide short trees that are averaged.
+
+### Boosted Trees
+
+The idea behind boosted trees comes from the concept of boosting in general. When boosting first came out it was known as gradient boosted machine (gbm). You fit models and the variables that are poorly performing have increased weights, and good performed weights are reduced. The reduction is done because it assumes that the variable is easy to figure out.
+
+The orginal package used for gbms was `gbm`, now it is `xgboost`.
+
+Returing to the `acs` again. The `xgboost` package does not take the formula interface. 
+
+```{r}
+library(xgboost)
+acs <- read.table("https://www.jaredlander.com/data/acs_ny.csv", 
+                  stringsAsFactors = FALSE,
+                  sep = ",", header = T)
+acs$income <- acs$FamilyIncome > 120000
+acs_x <- build.x(acs_formula, data = acs, contrasts = F)
+acs_y <- build.y(acs_formula, data = acs)
+head(acs)
+```
+Clearly this is made for classification because the x argument is called data, and y argument is called label. We want to limit how many "questions" the tree asks, also called depth. 
+```{r}
+income_tree1 <- xgboost(data = acs_x, label = acs_y,
+                        max_depth = 4,
+                        objective = "binary:logistic",
+                        nrounds = 1)
+
+# Creating 100
+income_tree2 <- xgboost(data = acs_x, label = acs_y,
+                        max_depth = 4,
+                        objective = "binary:logistic",
+                        nrounds = 100,
+                        nthread = 8,
+                        print_every_n = 25)
+# Creating 100
+income_tree3 <- xgboost(data = acs_x, label = acs_y,
+                        max_depth = 4,
+                        objective = "binary:logistic", 
+                        nrounds = 500,
+                        nthread = 8,
+                        xgb_model = income_tree2, # allows you to build off of other models
+                        print_every_n = 50)  
+```
+`xgboost` writes the model to disk. This model isn't good for inference, only prediction. 
+```{r}
+summary(income_tree3)
+```
+Historically it has been dificult to plot xgboost trees, thats changing.
+
+#### Plotting Trees
+Feed the function `xgb.plot.multi.trees()` the name of the tree. Arguments have `feature_names`
+```{r}
+xgb.plot.multi.trees(income_tree3, feature_names = colnames(acs_x))
+```
+More important than knowing the splits of the trees, is knowing the importance of each variable.
+```{r}
+xgb.plot.importance(xgb.importance(income_tree3, feature_names = colnames(acs_x)))
+```
+
+It tells you how importance each model was in fitting the model. 
+
+When cross validating you want to cross validate `nrounds`, `max_depth`, and `eta`.
+
+`eta` is the learning rate. Tells 
+
+## Random Forest(ish) Model
+
+We can replicate a random forest using the xgboost function. 
+```{r}
+income_forest1 <- xgboost(data = acs_x, label = acs_y, 
+                          max_depth = 4,
+                          num_parallel_tree = 100, # random forest is wide, this is creating 500 paralelle trees, making 500 wide
+                          nrounds = 20,
+                          subsample = 0.5,
+                          colsample_bytree = 0.5,
+                          objective = "binary:logistic",
+                          nthread = 8)
+```
+
+______
+
+# Clustering 
+
+"What's the first thing we need?"
+"Data!"
+```{r}
+wine <- readr::read_csv("https://www.jaredlander.com/data/wine.csv")
+head(wine)
+```
+Create training data
+```{r}
+wine_train <- wine[, -1]
+```
+The goal of the clustering aproach is to reduce the ratio of within group sum of squares to out of group sum of squares.
+
+```{r}
+wine_k3 <- kmeans(wine_train, centers = 3)
+plot(wine_k3, data = wine_train)
+```
+When plotting from multiple dimensions to two dimensions "it's like looking at a shadow".
+
+How do we know how many clusters is enough? Use gap statistics
+
+```{r}
+library(cluster)
+the_gap <- clusGap(wine_train, FUN = kmeans, K.max = 20)
+plot(the_gap)
+```
+
+Since the gap statistics keeps changing for each iteration, it might be alluding to the fact that the model might not be good for your data. Kmeans is sensitive to outliers and is doesn't work with factors.
+
+To deal with sensitivity to outliers, we can look at the median values rather than the mean values. To deal with this we use k-meanoids (pam).
+
+```{r}
+the_gap2 <- clusGap(wine_train, FUN = pam, K.max = 20)
+plot(the_gap2)
+```
+
+### Hierarchical Clustering 
+```{r}
+wine_h <- hclust(dist(wine_train))
+plot(wine_h)
+rect.hclust(wine_h, k = 3, border = "blue")
+rect.hclust(wine_h, k = 5, border = "red")
+rect.hclust(wine_h, k = 15, border = "yellow")
+```
+
+"There is no way of knowing which one is right. It's which one tells a better story."
+"The way clustering should be used is to kick start you down a path, but not be the end."
